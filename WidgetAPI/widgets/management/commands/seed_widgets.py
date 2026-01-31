@@ -54,6 +54,35 @@ class Command(BaseCommand):
                 wi.save()
             self.stdout.write(f'  WidgetInstance position {pos} ({wtype.slug}): {"created" if created else "updated"}')
 
+        # Second screen (for testing multi-screen / second tab)
+        screen2, created2 = Screen.objects.get_or_create(
+            index=1,
+            defaults={'name': 'Page 2'}
+        )
+        if created2:
+            self.stdout.write('  Screen "Page 2" (index=1) created.')
+        else:
+            screen2.name = 'Page 2'
+            screen2.save()
+
+        instances_data_screen2 = [
+            (0, stock_type, {'symbol': 'GOOGL'}),
+            (1, weather_type, {'city': 'London', 'unit': 'C'}),
+            (2, system_type, {}),
+            (3, stock_type, {'symbol': 'MSFT'}),
+        ]
+        for pos, wtype, config in instances_data_screen2:
+            wi, created = WidgetInstance.objects.get_or_create(
+                screen=screen2,
+                position_index=pos,
+                defaults={'widget_type': wtype, 'configuration': config}
+            )
+            if not created:
+                wi.widget_type = wtype
+                wi.configuration = config
+                wi.save()
+            self.stdout.write(f'  WidgetInstance Page 2 position {pos} ({wtype.slug}): {"created" if created else "updated"}')
+
         # DeviceSettings singleton
         DeviceSettings.objects.get_or_create_singleton(
             wifi_ssids=[],

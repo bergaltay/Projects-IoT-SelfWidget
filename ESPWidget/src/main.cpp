@@ -325,6 +325,8 @@ static void settings_btn_cb(lv_event_t *e) {
     show_settings_modal();
 }
 
+#define TABVIEW_BAR_HEIGHT 24
+
 static void build_ui_from_screens(lv_obj_t *content_parent, const String &json) {
     if (!content_parent) return;
     JsonDocument doc;
@@ -333,23 +335,39 @@ static void build_ui_from_screens(lv_obj_t *content_parent, const String &json) 
         Serial.println("JSON parse failed");
         return;
     }
+    if (doc.overflowed()) {
+        Serial.println("JSON overflow");
+        return;
+    }
     JsonArray screens = doc.as<JsonArray>();
     if (screens.isNull() || screens.size() == 0) {
         Serial.println("No screens");
         return;
     }
-    JsonObject screenObj = screens[0].as<JsonObject>();
-    lv_obj_set_style_bg_color(content_parent, lv_color_hex(0x003366), 0);
 
-    JsonArray widgets = screenObj["widgets"].as<JsonArray>();
-    for (JsonVariant wv : widgets) {
-        JsonObject w = wv.as<JsonObject>();
-        int pos = w["position_index"] | 0;
-        const char *type = w["widget_type"]["slug"].as<const char *>();
-        if (!type) type = "";
-        JsonObject data = w["data"].as<JsonObject>();
-        JsonObject config = w["configuration"].as<JsonObject>();
-        WidgetFactory::createWidget(content_parent, pos, type, data, config);
+    lv_obj_t *tabview = lv_tabview_create(content_parent, LV_DIR_BOTTOM, TABVIEW_BAR_HEIGHT);
+    lv_obj_set_size(tabview, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(tabview, lv_color_hex(0x003366), 0);
+    lv_obj_clear_flag(tabview, LV_OBJ_FLAG_SCROLLABLE);
+
+    for (JsonVariant screenV : screens) {
+        JsonObject screenObj = screenV.as<JsonObject>();
+        const char *name = screenObj["name"].as<const char *>();
+        if (!name) name = "Screen";
+        lv_obj_t *tab = lv_tabview_add_tab(tabview, name);
+        lv_obj_set_style_bg_color(tab, lv_color_hex(0x003366), 0);
+        lv_obj_update_layout(tabview);
+
+        JsonArray widgets = screenObj["widgets"].as<JsonArray>();
+        for (JsonVariant wv : widgets) {
+            JsonObject w = wv.as<JsonObject>();
+            int pos = w["position_index"] | 0;
+            const char *type = w["widget_type"]["slug"].as<const char *>();
+            if (!type) type = "";
+            JsonObject data = w["data"].as<JsonObject>();
+            JsonObject config = w["configuration"].as<JsonObject>();
+            WidgetFactory::createWidget(tab, pos, type, data, config);
+        }
     }
 }
 
