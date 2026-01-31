@@ -68,6 +68,25 @@ curl http://127.0.0.1:8000/api/screens/
 ]
 ```
 
+### GET /api/device-settings/
+
+Returns the singleton device settings: `id`, `wifi_ssids`, `poll_interval_sec`, `brightness`. The ESP32 can use `poll_interval_sec` for screen refresh and `brightness` for backlight (optional sync with backend).
+
+**Example request:**
+```bash
+curl http://127.0.0.1:8000/api/device-settings/
+```
+
+**Example response:**
+```json
+{
+  "id": 1,
+  "wifi_ssids": [],
+  "poll_interval_sec": 30,
+  "brightness": 100
+}
+```
+
 ## Admin
 
 Create a superuser and use the Django admin to manage WidgetTypes, Screens, WidgetInstances, and DeviceSettings:

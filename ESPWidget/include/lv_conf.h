@@ -50,6 +50,7 @@
 #define LV_USE_MONKEY 0
 #define LV_USE_GRIDNAV 0
 #define LV_USE_FRAGMENT 0
+#define LV_USE_FLEX 1
 
 #endif /* enable */
 

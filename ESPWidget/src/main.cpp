@@ -4,6 +4,8 @@
  */
 #include <Arduino.h>
 #include <WiFi.h>
+#include <stdio.h>
+#include <time.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Adafruit_GFX.h>
@@ -36,6 +38,10 @@ static void my_disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 static SPIClass touchSPI(HSPI);
 static XPT2046_Touchscreen touch(XPT2046_CS, XPT2046_IRQ);
 
+/* Touch calibration: offset to align touch sensor with display (tune to your panel) */
+#define TOUCH_OFFSET_X  35   /* if you had to press right of target, increase this */
+#define TOUCH_OFFSET_Y  -5
+
 static void my_touchpad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     (void)drv;
     if (touch.touched()) {
@@ -44,7 +50,10 @@ static void my_touchpad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         /* Raw to display: XPT2046 often 0..4095; map to 0..TFT_W-1 and 0..TFT_H-1 */
         data->point.x = (int32_t)((uint32_t)p.x * TFT_W / 4096);
         data->point.y = (int32_t)((uint32_t)p.y * TFT_H / 4096);
-        /* Some boards swap or invert axes */
+        /* Apply calibration offset (sensor vs display misalignment) */
+        data->point.x += TOUCH_OFFSET_X;
+        data->point.y += TOUCH_OFFSET_Y;
+        /* Clamp to screen */
         if (data->point.x < 0) data->point.x = 0;
         if (data->point.x >= TFT_W) data->point.x = TFT_W - 1;
         if (data->point.y < 0) data->point.y = 0;
@@ -70,9 +79,30 @@ static void my_touchpad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
 #define API_BASE_URL "http://192.168.1.100:8000"
 #endif
 
+#define DEVICE_NAME       "HomeLab"
+#define STATUS_BAR_H      24
+#define TZ_OFFSET_SEC     (3 * 3600)   /* UTC+3 Turkey; set 0 for UTC */
+#define NTP_SERVER1       "pool.ntp.org"
+#define NTP_SERVER2       "time.nist.gov"
+
+/* Backlight PWM (TFT_BL pin 21): 0-100%, default 100% */
+#define LEDC_CHANNEL_BL  0
+#define LEDC_FREQ_BL     5000
+#define LEDC_RESOLUTION  8
+static int g_brightness = 100;
+
+static void set_backlight_pct(int pct) {
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    g_brightness = pct;
+    uint32_t duty = (uint32_t)(pct * 255) / 100;
+    ledcWrite(LEDC_CHANNEL_BL, duty);
+}
+
 static void init_display() {
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
+    ledcSetup(LEDC_CHANNEL_BL, LEDC_FREQ_BL, LEDC_RESOLUTION);
+    ledcAttachPin(TFT_BL, LEDC_CHANNEL_BL);
+    ledcWrite(LEDC_CHANNEL_BL, 255);
     tft.begin();
     tft.setRotation(1);
     tft.fillScreen(ILI9341_BLACK);
@@ -102,6 +132,114 @@ static void init_lvgl() {
     lv_indev_drv_register(&indev_drv);
 }
 
+/* Status bar and content area; set by create_main_layout(), used by timers */
+static lv_obj_t *g_content_area = NULL;
+static lv_obj_t *g_status_wifi_label = NULL;
+static lv_obj_t *g_status_clock_label = NULL;
+
+static void settings_btn_cb(lv_event_t *e);
+
+static lv_obj_t *create_main_layout(void) {
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), 0);
+    lv_obj_set_layout(scr, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(scr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(scr, 0, 0);
+    lv_obj_set_style_pad_column(scr, 0, 0);
+
+    /* Status bar: fixed height, dark background */
+    lv_obj_t *status_bar = lv_obj_create(scr);
+    lv_obj_set_height(status_bar, STATUS_BAR_H);
+    lv_obj_set_width(status_bar, lv_pct(100));
+    lv_obj_set_style_bg_color(status_bar, lv_color_hex(0x1a1a1a), 0);
+    lv_obj_set_style_border_width(status_bar, 0, 0);
+    lv_obj_set_style_pad_all(status_bar, 2, 0);
+    lv_obj_set_style_flex_grow(status_bar, 0, 0);
+    lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_layout(status_bar, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(status_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(status_bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    /* Left: device name */
+    lv_obj_t *name_lbl = lv_label_create(status_bar);
+    lv_label_set_text(name_lbl, DEVICE_NAME);
+    lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(name_lbl, lv_color_hex(0xcccccc), 0);
+
+    /* Right: WiFi icon + clock (container so they stay together) */
+    lv_obj_t *right_cont = lv_obj_create(status_bar);
+    lv_obj_set_height(right_cont, STATUS_BAR_H - 4);
+    lv_obj_set_style_bg_opa(right_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(right_cont, 0, 0);
+    lv_obj_set_style_pad_all(right_cont, 0, 0);
+    lv_obj_clear_flag(right_cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_layout(right_cont, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(right_cont, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(right_cont, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(right_cont, 6, 0);
+
+    g_status_wifi_label = lv_label_create(right_cont);
+    lv_label_set_text(g_status_wifi_label, LV_SYMBOL_WIFI);
+    lv_obj_set_style_text_font(g_status_wifi_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0x888888), 0);
+
+    g_status_clock_label = lv_label_create(right_cont);
+    lv_label_set_text(g_status_clock_label, "--:--");
+    lv_obj_set_style_text_font(g_status_clock_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(g_status_clock_label, lv_color_hex(0xcccccc), 0);
+
+    /* Settings button (rightmost): opens settings modal */
+    lv_obj_t *settings_btn = lv_btn_create(right_cont);
+    lv_obj_set_size(settings_btn, 28, 20);
+    lv_obj_set_style_pad_all(settings_btn, 2, 0);
+    lv_obj_add_event_cb(settings_btn, settings_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *settings_lbl = lv_label_create(settings_btn);
+    lv_label_set_text(settings_lbl, LV_SYMBOL_SETTINGS);
+    lv_obj_center(settings_lbl);
+    lv_obj_set_style_text_font(settings_lbl, &lv_font_montserrat_14, 0);
+
+    /* Content area: flex-grow 1, takes remaining space */
+    g_content_area = lv_obj_create(scr);
+    lv_obj_set_width(g_content_area, lv_pct(100));
+    lv_obj_set_style_flex_grow(g_content_area, 1, 0);
+    lv_obj_set_style_bg_color(g_content_area, lv_color_hex(0x003366), 0);
+    lv_obj_set_style_border_width(g_content_area, 0, 0);
+    lv_obj_set_style_pad_all(g_content_area, 0, 0);
+    lv_obj_clear_flag(g_content_area, LV_OBJ_FLAG_SCROLLABLE);
+
+    return g_content_area;
+}
+
+static void clock_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (!g_status_clock_label) return;
+    time_t now = time(nullptr);
+    if (now < 0) return;
+    struct tm *t = localtime(&now);
+    if (!t) return;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d:%02d", t->tm_hour, t->tm_min);
+    lv_label_set_text(g_status_clock_label, buf);
+}
+
+static void wifi_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (!g_status_wifi_label) return;
+    if (WiFi.status() != WL_CONNECTED) {
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0x666666), 0);
+        return;
+    }
+    int rssi = WiFi.RSSI();
+    if (rssi > -50) {
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0x00aa00), 0);
+    } else if (rssi > -70) {
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0xcccc00), 0);
+    } else {
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0xcc6600), 0);
+    }
+}
+
 static String fetch_screens_json() {
     HTTPClient http;
     String url = String(API_BASE_URL) + "/api/screens/";
@@ -115,7 +253,80 @@ static String fetch_screens_json() {
     return payload;
 }
 
-static void build_ui_from_screens(const String &json) {
+static void show_settings_modal();
+
+static void modal_close_btn_cb(lv_event_t *e) {
+    lv_obj_t *overlay = (lv_obj_t *)lv_event_get_user_data(e);
+    if (overlay) lv_obj_del(overlay);
+}
+
+static void modal_slider_cb(lv_event_t *e) {
+    lv_obj_t *slider = lv_event_get_target(e);
+    int val = (int)lv_slider_get_value(slider);
+    set_backlight_pct(val);
+}
+
+static void show_settings_modal() {
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_t *overlay = lv_obj_create(scr);
+    lv_obj_set_size(overlay, TFT_W, TFT_H);
+    lv_obj_set_pos(overlay, 0, 0);
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(overlay, 0, 0);
+    lv_obj_set_style_pad_all(overlay, 0, 0);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_move_foreground(overlay);
+
+    lv_obj_t *box = lv_obj_create(overlay);
+    lv_obj_set_size(box, 260, 180);
+    lv_obj_center(box);
+    lv_obj_set_style_bg_color(box, lv_color_hex(0x1a1a1a), 0);
+    lv_obj_set_style_border_width(box, 1, 0);
+    lv_obj_set_style_border_color(box, lv_color_hex(0x444444), 0);
+    lv_obj_set_style_pad_all(box, 8, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(box);
+    lv_label_set_text(title, "Device Settings");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
+
+    char info_buf[128];
+    if (WiFi.status() == WL_CONNECTED) {
+        snprintf(info_buf, sizeof(info_buf), "SSID: %s\nIP: %s",
+                 WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    } else {
+        snprintf(info_buf, sizeof(info_buf), "Not connected");
+    }
+    lv_obj_t *info = lv_label_create(box);
+    lv_label_set_text(info, info_buf);
+    lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
+    lv_obj_align(info, LV_ALIGN_TOP_LEFT, 0, 28);
+
+    lv_obj_t *slider = lv_slider_create(box);
+    lv_slider_set_range(slider, 0, 100);
+    lv_slider_set_value(slider, g_brightness, LV_ANIM_OFF);
+    lv_obj_set_width(slider, 200);
+    lv_obj_align(slider, LV_ALIGN_TOP_MID, 0, 90);
+    lv_obj_add_event_cb(slider, modal_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *close_btn = lv_btn_create(box);
+    lv_obj_set_size(close_btn, 80, 32);
+    lv_obj_align(close_btn, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_add_event_cb(close_btn, modal_close_btn_cb, LV_EVENT_CLICKED, overlay);
+    lv_obj_t *close_lbl = lv_label_create(close_btn);
+    lv_label_set_text(close_lbl, "Close");
+    lv_obj_center(close_lbl);
+}
+
+static void settings_btn_cb(lv_event_t *e) {
+    (void)e;
+    show_settings_modal();
+}
+
+static void build_ui_from_screens(lv_obj_t *content_parent, const String &json) {
+    if (!content_parent) return;
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
     if (err) {
@@ -127,10 +338,8 @@ static void build_ui_from_screens(const String &json) {
         Serial.println("No screens");
         return;
     }
-    /* Use first screen only for this scaffold */
     JsonObject screenObj = screens[0].as<JsonObject>();
-    lv_obj_t *scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), 0);
+    lv_obj_set_style_bg_color(content_parent, lv_color_hex(0x003366), 0);
 
     JsonArray widgets = screenObj["widgets"].as<JsonArray>();
     for (JsonVariant wv : widgets) {
@@ -140,7 +349,7 @@ static void build_ui_from_screens(const String &json) {
         if (!type) type = "";
         JsonObject data = w["data"].as<JsonObject>();
         JsonObject config = w["configuration"].as<JsonObject>();
-        WidgetFactory::createWidget(scr, pos, type, data, config);
+        WidgetFactory::createWidget(content_parent, pos, type, data, config);
     }
 }
 
@@ -152,6 +361,9 @@ void setup() {
     init_display();
     init_touch();
     init_lvgl();
+
+    /* Root layout: flex column = status bar + content area */
+    lv_obj_t *content_area = create_main_layout();
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -166,19 +378,25 @@ void setup() {
     } else {
         Serial.print("WiFi OK: ");
         Serial.println(WiFi.localIP());
+        configTime(TZ_OFFSET_SEC, 0, NTP_SERVER1, NTP_SERVER2);
+        wifi_timer_cb(NULL);
         String json = fetch_screens_json();
         if (json.length() > 0) {
-            build_ui_from_screens(json);
+            lv_obj_update_layout(lv_scr_act());
+            build_ui_from_screens(content_area, json);
         } else {
             Serial.println("API fetch failed - showing placeholder");
         }
     }
-    /* If no widgets were built, show a simple label */
-    if (lv_obj_get_child_cnt(lv_scr_act()) == 0) {
-        lv_obj_t *label = lv_label_create(lv_scr_act());
+    if (g_content_area && lv_obj_get_child_cnt(g_content_area) == 0) {
+        lv_obj_update_layout(lv_scr_act());
+        lv_obj_t *label = lv_label_create(g_content_area);
         lv_label_set_text(label, "No screens\nConfigure backend\nGET /api/screens/");
         lv_obj_center(label);
     }
+
+    lv_timer_create(clock_timer_cb, 1000, NULL);
+    lv_timer_create(wifi_timer_cb, 5000, NULL);
 }
 
 void loop() {
