@@ -1,0 +1,9 @@
+.pio
+.pioenvs
+.piolibdeps
+.vscode/.bored
+*.o
+*.a
+*.elf
+*.bin
+include/config/wifi_config.h

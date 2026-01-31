@@ -1,0 +1,12 @@
+/**
+ * Copy this file to wifi_config.h and set your WiFi and API URL.
+ * Do not commit wifi_config.h if it contains real credentials.
+ */
+#ifndef WIFI_CONFIG_H
+#define WIFI_CONFIG_H
+
+#define WIFI_SSID     "MERCUSYS_EC98"
+#define WIFI_PASS     "26032004"
+#define API_BASE_URL  "http://192.168.0.12:8000"
+
+#endif
