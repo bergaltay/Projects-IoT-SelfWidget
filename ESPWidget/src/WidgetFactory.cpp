@@ -23,12 +23,13 @@ static lv_obj_t *make_cell_container(lv_obj_t *parent, int position_index) {
     lv_coord_t x, y, w, h;
     get_cell_bounds(parent, position_index, &x, &y, &w, &h);
     lv_obj_t *cont = lv_obj_create(parent);
-    lv_obj_set_size(cont, w - 4, h - 4);
-    lv_obj_set_pos(cont, x + 2, y + 2);
-    lv_obj_set_style_bg_color(cont, lv_color_hex(0x2a2a2a), 0);
+    /* Full cell size: no gaps, widgets fill the screen */
+    lv_obj_set_size(cont, w, h);
+    lv_obj_set_pos(cont, x, y);
+    lv_obj_set_style_bg_color(cont, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(cont, 1, 0);
-    lv_obj_set_style_border_color(cont, lv_color_hex(0x444444), 0);
-    lv_obj_set_style_pad_all(cont, 4, 0);
+    lv_obj_set_style_border_color(cont, lv_color_hex(0x475569), 0);
+    lv_obj_set_style_pad_all(cont, 6, 0);
     lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
     return cont;
 }
@@ -46,20 +47,23 @@ static void build_weather_card(lv_obj_t *cont, JsonObject data) {
     snprintf(buf, sizeof(buf), "%s", city);
     lv_obj_t *lbl_city = lv_label_create(cont);
     lv_label_set_text(lbl_city, buf);
-    lv_obj_set_style_text_font(lbl_city, &lv_font_montserrat_14, 0);
-    lv_obj_align(lbl_city, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_set_style_text_font(lbl_city, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_city, lv_color_hex(0xcbd5e1), 0);
+    lv_obj_align(lbl_city, LV_ALIGN_TOP_MID, 0, 4);
 
     snprintf(buf, sizeof(buf), "%d °%s", temp, unit);
     lv_obj_t *lbl_temp = lv_label_create(cont);
     lv_label_set_text(lbl_temp, buf);
-    lv_obj_set_style_text_font(lbl_temp, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_temp, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(lbl_temp, lv_color_hex(0xf8fafc), 0);
     lv_obj_center(lbl_temp);
 
     snprintf(buf, sizeof(buf), "%s", cond);
     lv_obj_t *lbl_cond = lv_label_create(cont);
     lv_label_set_text(lbl_cond, buf);
-    lv_obj_set_style_text_font(lbl_cond, &lv_font_montserrat_14, 0);
-    lv_obj_align(lbl_cond, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_obj_set_style_text_font(lbl_cond, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_cond, lv_color_hex(0xcbd5e1), 0);
+    lv_obj_align(lbl_cond, LV_ALIGN_BOTTOM_MID, 0, -4);
 }
 
 static void build_stock_card(lv_obj_t *cont, JsonObject data) {
@@ -72,20 +76,23 @@ static void build_stock_card(lv_obj_t *cont, JsonObject data) {
     snprintf(buf, sizeof(buf), "%s", symbol);
     lv_obj_t *lbl_sym = lv_label_create(cont);
     lv_label_set_text(lbl_sym, buf);
-    lv_obj_set_style_text_font(lbl_sym, &lv_font_montserrat_14, 0);
-    lv_obj_align(lbl_sym, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_set_style_text_font(lbl_sym, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_sym, lv_color_hex(0xcbd5e1), 0);
+    lv_obj_align(lbl_sym, LV_ALIGN_TOP_MID, 0, 4);
 
     snprintf(buf, sizeof(buf), "%.2f", price);
     lv_obj_t *lbl_price = lv_label_create(cont);
     lv_label_set_text(lbl_price, buf);
-    lv_obj_set_style_text_font(lbl_price, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_price, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(lbl_price, lv_color_hex(0xf8fafc), 0);
     lv_obj_center(lbl_price);
 
     snprintf(buf, sizeof(buf), "%+.2f", chg);
     lv_obj_t *lbl_chg = lv_label_create(cont);
     lv_label_set_text(lbl_chg, buf);
-    lv_obj_set_style_text_color(lbl_chg, chg >= 0 ? lv_color_hex(0x00aa00) : lv_color_hex(0xaa0000), 0);
-    lv_obj_align(lbl_chg, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_obj_set_style_text_font(lbl_chg, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_chg, chg >= 0 ? lv_color_hex(0x22c55e) : lv_color_hex(0xef4444), 0);
+    lv_obj_align(lbl_chg, LV_ALIGN_BOTTOM_MID, 0, -4);
 }
 
 static void build_system_stats(lv_obj_t *cont, JsonObject data) {
@@ -97,17 +104,23 @@ static void build_system_stats(lv_obj_t *cont, JsonObject data) {
     snprintf(buf, sizeof(buf), "CPU: %d%%", cpu);
     lv_obj_t *lbl_cpu = lv_label_create(cont);
     lv_label_set_text(lbl_cpu, buf);
-    lv_obj_align(lbl_cpu, LV_ALIGN_TOP_LEFT, 4, 4);
+    lv_obj_set_style_text_font(lbl_cpu, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_cpu, lv_color_hex(0xf8fafc), 0);
+    lv_obj_align(lbl_cpu, LV_ALIGN_TOP_LEFT, 6, 6);
 
     snprintf(buf, sizeof(buf), "Mem: %d%%", mem);
     lv_obj_t *lbl_mem = lv_label_create(cont);
     lv_label_set_text(lbl_mem, buf);
-    lv_obj_align(lbl_mem, LV_ALIGN_LEFT_MID, 4, 0);
+    lv_obj_set_style_text_font(lbl_mem, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_mem, lv_color_hex(0xf8fafc), 0);
+    lv_obj_align(lbl_mem, LV_ALIGN_LEFT_MID, 6, 0);
 
     snprintf(buf, sizeof(buf), "Disk: %d%%", disk);
     lv_obj_t *lbl_disk = lv_label_create(cont);
     lv_label_set_text(lbl_disk, buf);
-    lv_obj_align(lbl_disk, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    lv_obj_set_style_text_font(lbl_disk, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_disk, lv_color_hex(0xf8fafc), 0);
+    lv_obj_align(lbl_disk, LV_ALIGN_BOTTOM_LEFT, 6, -6);
 }
 
 void WidgetFactory::createWidget(
@@ -131,6 +144,8 @@ void WidgetFactory::createWidget(
     } else {
         lv_obj_t *lbl = lv_label_create(cont);
         lv_label_set_text_fmt(lbl, "Unknown: %s", type ? type : "");
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0xcbd5e1), 0);
         lv_obj_center(lbl);
     }
 }

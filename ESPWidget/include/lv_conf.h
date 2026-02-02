@@ -37,6 +37,7 @@
 #define LV_USE_THEME_SIMPLE 0
 #define LV_USE_THEME_MONO 0
 #define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_18 1
 #define LV_FONT_MONTSERRAT_24 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 #define LV_USE_ANIMATION 1

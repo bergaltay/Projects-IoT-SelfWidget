@@ -3,6 +3,7 @@
  * Display: Adafruit ILI9341 (my_disp_flush). Touch: XPT2046 (my_touchpad_read).
  */
 #include <Arduino.h>
+#include <SPI.h>
 #include <WiFi.h>
 #include <stdio.h>
 #include <time.h>
@@ -38,26 +39,24 @@ static void my_disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 static SPIClass touchSPI(HSPI);
 static XPT2046_Touchscreen touch(XPT2046_CS, XPT2046_IRQ);
 
-/* Touch calibration: offset to align touch sensor with display (tune to your panel) */
-#define TOUCH_OFFSET_X  35   /* if you had to press right of target, increase this */
-#define TOUCH_OFFSET_Y  -5
+/* Touch calibration: legacy CYD mapping (axes swapped, calibrated range 200–3700) */
+#define TOUCH_MAP_LO  200
+#define TOUCH_MAP_HI  3700
 
 static void my_touchpad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     (void)drv;
     if (touch.touched()) {
         data->state = LV_INDEV_STATE_PRESSED;
         TS_Point p = touch.getPoint();
-        /* Raw to display: XPT2046 often 0..4095; map to 0..TFT_W-1 and 0..TFT_H-1 */
-        data->point.x = (int32_t)((uint32_t)p.x * TFT_W / 4096);
-        data->point.y = (int32_t)((uint32_t)p.y * TFT_H / 4096);
-        /* Apply calibration offset (sensor vs display misalignment) */
-        data->point.x += TOUCH_OFFSET_X;
-        data->point.y += TOUCH_OFFSET_Y;
-        /* Clamp to screen */
-        if (data->point.x < 0) data->point.x = 0;
-        if (data->point.x >= TFT_W) data->point.x = TFT_W - 1;
-        if (data->point.y < 0) data->point.y = 0;
-        if (data->point.y >= TFT_H) data->point.y = TFT_H - 1;
+        /* Legacy logic: X uses p.y, Y uses p.x (axes swapped); map 200–3700 -> 0–width/height
+         * If the screen feels upside-down (top and bottom swapped), invert Y by reversing
+         * the output range so moving down increases Y correctly. */
+        int32_t touchX = (int32_t)map(p.y, TOUCH_MAP_LO, TOUCH_MAP_HI, 0, TFT_W);
+        int32_t touchY = (int32_t)map(p.x, TOUCH_MAP_LO, TOUCH_MAP_HI, TFT_H - 1, 0);
+        touchX = (int32_t)constrain(touchX, 0, TFT_W - 1);
+        touchY = (int32_t)constrain(touchY, 0, TFT_H - 1);
+        data->point.x = touchX;
+        data->point.y = touchY;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
@@ -99,11 +98,16 @@ static void set_backlight_pct(int pct) {
     ledcWrite(LEDC_CHANNEL_BL, duty);
 }
 
+#define SPI_DISPLAY_FREQ  27000000
+
 static void init_display() {
     ledcSetup(LEDC_CHANNEL_BL, LEDC_FREQ_BL, LEDC_RESOLUTION);
     ledcAttachPin(TFT_BL, LEDC_CHANNEL_BL);
     ledcWrite(LEDC_CHANNEL_BL, 255);
     tft.begin();
+#if defined(ESP32)
+    SPI.setFrequency(SPI_DISPLAY_FREQ);
+#endif
     tft.setRotation(1);
     tft.fillScreen(ILI9341_BLACK);
 }
@@ -111,6 +115,7 @@ static void init_display() {
 static void init_touch() {
     touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
     touch.begin(touchSPI);
+    touch.setRotation(0);
 }
 
 static void init_lvgl() {
@@ -141,7 +146,7 @@ static void settings_btn_cb(lv_event_t *e);
 
 static lv_obj_t *create_main_layout(void) {
     lv_obj_t *scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x1e293b), 0);
     lv_obj_set_layout(scr, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(scr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -152,7 +157,7 @@ static lv_obj_t *create_main_layout(void) {
     lv_obj_t *status_bar = lv_obj_create(scr);
     lv_obj_set_height(status_bar, STATUS_BAR_H);
     lv_obj_set_width(status_bar, lv_pct(100));
-    lv_obj_set_style_bg_color(status_bar, lv_color_hex(0x1a1a1a), 0);
+    lv_obj_set_style_bg_color(status_bar, lv_color_hex(0x0f172a), 0);
     lv_obj_set_style_border_width(status_bar, 0, 0);
     lv_obj_set_style_pad_all(status_bar, 2, 0);
     lv_obj_set_style_flex_grow(status_bar, 0, 0);
@@ -165,7 +170,7 @@ static lv_obj_t *create_main_layout(void) {
     lv_obj_t *name_lbl = lv_label_create(status_bar);
     lv_label_set_text(name_lbl, DEVICE_NAME);
     lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(name_lbl, lv_color_hex(0xcccccc), 0);
+    lv_obj_set_style_text_color(name_lbl, lv_color_hex(0xf1f5f9), 0);
 
     /* Right: WiFi icon + clock (container so they stay together) */
     lv_obj_t *right_cont = lv_obj_create(status_bar);
@@ -187,7 +192,7 @@ static lv_obj_t *create_main_layout(void) {
     g_status_clock_label = lv_label_create(right_cont);
     lv_label_set_text(g_status_clock_label, "--:--");
     lv_obj_set_style_text_font(g_status_clock_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(g_status_clock_label, lv_color_hex(0xcccccc), 0);
+    lv_obj_set_style_text_color(g_status_clock_label, lv_color_hex(0xf1f5f9), 0);
 
     /* Settings button (rightmost): opens settings modal */
     lv_obj_t *settings_btn = lv_btn_create(right_cont);
@@ -203,7 +208,7 @@ static lv_obj_t *create_main_layout(void) {
     g_content_area = lv_obj_create(scr);
     lv_obj_set_width(g_content_area, lv_pct(100));
     lv_obj_set_style_flex_grow(g_content_area, 1, 0);
-    lv_obj_set_style_bg_color(g_content_area, lv_color_hex(0x003366), 0);
+    lv_obj_set_style_bg_color(g_content_area, lv_color_hex(0x1e293b), 0);
     lv_obj_set_style_border_width(g_content_area, 0, 0);
     lv_obj_set_style_pad_all(g_content_area, 0, 0);
     lv_obj_clear_flag(g_content_area, LV_OBJ_FLAG_SCROLLABLE);
@@ -227,16 +232,16 @@ static void wifi_timer_cb(lv_timer_t *timer) {
     (void)timer;
     if (!g_status_wifi_label) return;
     if (WiFi.status() != WL_CONNECTED) {
-        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0x666666), 0);
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0x64748b), 0);
         return;
     }
     int rssi = WiFi.RSSI();
     if (rssi > -50) {
-        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0x00aa00), 0);
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0x22c55e), 0);
     } else if (rssi > -70) {
-        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0xcccc00), 0);
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0xeab308), 0);
     } else {
-        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0xcc6600), 0);
+        lv_obj_set_style_text_color(g_status_wifi_label, lv_color_hex(0xf97316), 0);
     }
 }
 
@@ -281,9 +286,9 @@ static void show_settings_modal() {
     lv_obj_t *box = lv_obj_create(overlay);
     lv_obj_set_size(box, 260, 180);
     lv_obj_center(box);
-    lv_obj_set_style_bg_color(box, lv_color_hex(0x1a1a1a), 0);
+    lv_obj_set_style_bg_color(box, lv_color_hex(0x0f172a), 0);
     lv_obj_set_style_border_width(box, 1, 0);
-    lv_obj_set_style_border_color(box, lv_color_hex(0x444444), 0);
+    lv_obj_set_style_border_color(box, lv_color_hex(0x475569), 0);
     lv_obj_set_style_pad_all(box, 8, 0);
     lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -347,15 +352,18 @@ static void build_ui_from_screens(lv_obj_t *content_parent, const String &json) 
 
     lv_obj_t *tabview = lv_tabview_create(content_parent, LV_DIR_BOTTOM, TABVIEW_BAR_HEIGHT);
     lv_obj_set_size(tabview, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_color(tabview, lv_color_hex(0x003366), 0);
+    lv_obj_set_style_bg_color(tabview, lv_color_hex(0x1e293b), 0);
     lv_obj_clear_flag(tabview, LV_OBJ_FLAG_SCROLLABLE);
+    /* Disable touch swipe: navigation only via tab buttons */
+    lv_obj_t *tabview_content = lv_tabview_get_content(tabview);
+    lv_obj_clear_flag(tabview_content, LV_OBJ_FLAG_SCROLLABLE);
 
     for (JsonVariant screenV : screens) {
         JsonObject screenObj = screenV.as<JsonObject>();
         const char *name = screenObj["name"].as<const char *>();
         if (!name) name = "Screen";
         lv_obj_t *tab = lv_tabview_add_tab(tabview, name);
-        lv_obj_set_style_bg_color(tab, lv_color_hex(0x003366), 0);
+        lv_obj_set_style_bg_color(tab, lv_color_hex(0x1e293b), 0);
         lv_obj_update_layout(tabview);
 
         JsonArray widgets = screenObj["widgets"].as<JsonArray>();
