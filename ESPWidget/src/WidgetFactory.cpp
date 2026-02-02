@@ -24,13 +24,13 @@ static lv_obj_t *make_cell_container(lv_obj_t *parent, int position_index) {
     lv_coord_t x, y, w, h;
     get_cell_bounds(parent, position_index, &x, &y, &w, &h);
     lv_obj_t *cont = lv_obj_create(parent);
-    /* Full cell size: no gaps, widgets fill the screen */
+    /* Full cell size: edge-to-edge, minimal internal padding */
     lv_obj_set_size(cont, w, h);
     lv_obj_set_pos(cont, x, y);
     lv_obj_set_style_bg_color(cont, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(cont, 1, 0);
     lv_obj_set_style_border_color(cont, lv_color_hex(0x475569), 0);
-    lv_obj_set_style_pad_all(cont, 6, 0);
+    lv_obj_set_style_pad_all(cont, 2, 0);
     lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
     return cont;
 }
@@ -109,6 +109,19 @@ static void build_system_stats(lv_obj_t *cont, JsonObject data) {
     int cpu = data["cpu_percent"] | 0;
     int mem = data["memory_percent"] | 0;
     int temp = data["temp"] | 0;
+    bool has_error = data["has_error"] | false;
+
+    /* Error indicator: red warning icon, top-right, hidden by default */
+    lv_obj_t *lbl_error = lv_label_create(cont);
+    lv_label_set_text(lbl_error, LV_SYMBOL_WARNING);
+    lv_obj_set_style_text_color(lbl_error, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_obj_set_style_text_font(lbl_error, &lv_font_montserrat_18, 0);
+    lv_obj_align(lbl_error, LV_ALIGN_TOP_RIGHT, -5, 5);
+    if (has_error) {
+        lv_obj_clear_flag(lbl_error, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(lbl_error, LV_OBJ_FLAG_HIDDEN);
+    }
 
     char buf[48];
     snprintf(buf, sizeof(buf), "CPU: %d%%", cpu);

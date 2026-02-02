@@ -147,6 +147,7 @@ static void settings_btn_cb(lv_event_t *e);
 static lv_obj_t *create_main_layout(void) {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x1e293b), 0);
+    lv_obj_set_style_pad_all(scr, 0, 0);
     lv_obj_set_layout(scr, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(scr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -386,10 +387,18 @@ static void build_ui_from_screens(lv_obj_t *content_parent, const String &json) 
     lv_obj_t *tabview = lv_tabview_create(content_parent, LV_DIR_BOTTOM, TABVIEW_BAR_HEIGHT);
     lv_obj_set_size(tabview, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(tabview, lv_color_hex(0x1e293b), 0);
+    lv_obj_set_style_pad_all(tabview, 0, 0);
     lv_obj_clear_flag(tabview, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Navigation bar (tab buttons): match status bar color palette */
+    lv_obj_t *tab_btns = lv_tabview_get_tab_btns(tabview);
+    lv_obj_set_style_bg_color(tab_btns, lv_color_hex(0x0f172a), 0);
+    lv_obj_set_style_text_color(tab_btns, lv_color_hex(0xf1f5f9), 0);
+
     /* Disable touch swipe: navigation only via tab buttons */
     lv_obj_t *tabview_content = lv_tabview_get_content(tabview);
     lv_obj_clear_flag(tabview_content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(tabview_content, 0, 0);
 
     for (JsonVariant screenV : screens) {
         JsonObject screenObj = screenV.as<JsonObject>();
@@ -397,6 +406,7 @@ static void build_ui_from_screens(lv_obj_t *content_parent, const String &json) 
         if (!name) name = "Screen";
         lv_obj_t *tab = lv_tabview_add_tab(tabview, name);
         lv_obj_set_style_bg_color(tab, lv_color_hex(0x1e293b), 0);
+        lv_obj_set_style_pad_all(tab, 0, 0);
         lv_obj_update_layout(tabview);
 
         JsonArray widgets = screenObj["widgets"].as<JsonArray>();
