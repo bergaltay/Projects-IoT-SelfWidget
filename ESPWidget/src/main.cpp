@@ -276,52 +276,85 @@ static void show_settings_modal() {
     lv_obj_t *overlay = lv_obj_create(scr);
     lv_obj_set_size(overlay, TFT_W, TFT_H);
     lv_obj_set_pos(overlay, 0, 0);
-    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_50, 0);
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x0f172a), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(overlay, 0, 0);
-    lv_obj_set_style_pad_all(overlay, 0, 0);
+    lv_obj_set_style_pad_all(overlay, 8, 0);
     lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
     lv_obj_move_foreground(overlay);
 
+    /* Fixed full-screen settings box, no scrolling */
     lv_obj_t *box = lv_obj_create(overlay);
-    lv_obj_set_size(box, 260, 180);
+    lv_obj_set_size(box, TFT_W - 16, TFT_H - 16);
     lv_obj_center(box);
-    lv_obj_set_style_bg_color(box, lv_color_hex(0x0f172a), 0);
+    lv_obj_set_style_bg_color(box, lv_color_hex(0x1e293b), 0);
     lv_obj_set_style_border_width(box, 1, 0);
     lv_obj_set_style_border_color(box, lv_color_hex(0x475569), 0);
-    lv_obj_set_style_pad_all(box, 8, 0);
+    lv_obj_set_style_pad_all(box, 10, 0);
     lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
 
     lv_obj_t *title = lv_label_create(box);
     lv_label_set_text(title, "Device Settings");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xf8fafc), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
+    lv_obj_clear_flag(title, LV_OBJ_FLAG_SCROLLABLE);
 
-    char info_buf[128];
+    char info_buf[192];
+    int y_off = 32;
     if (WiFi.status() == WL_CONNECTED) {
         snprintf(info_buf, sizeof(info_buf), "SSID: %s\nIP: %s",
                  WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
     } else {
-        snprintf(info_buf, sizeof(info_buf), "Not connected");
+        snprintf(info_buf, sizeof(info_buf), "WiFi: Not connected");
     }
     lv_obj_t *info = lv_label_create(box);
     lv_label_set_text(info, info_buf);
     lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
-    lv_obj_align(info, LV_ALIGN_TOP_LEFT, 0, 28);
+    lv_obj_set_style_text_color(info, lv_color_hex(0xcbd5e1), 0);
+    lv_obj_align(info, LV_ALIGN_TOP_LEFT, 4, y_off);
+    lv_obj_clear_flag(info, LV_OBJ_FLAG_SCROLLABLE);
+    y_off += 36;
+
+    lv_obj_t *api_lbl = lv_label_create(box);
+    snprintf(info_buf, sizeof(info_buf), "API: %s", API_BASE_URL);
+    lv_label_set_text(api_lbl, info_buf);
+    lv_obj_set_style_text_font(api_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(api_lbl, lv_color_hex(0xcbd5e1), 0);
+    lv_obj_align(api_lbl, LV_ALIGN_TOP_LEFT, 4, y_off);
+    lv_obj_set_width(api_lbl, TFT_W - 40);
+    lv_label_set_long_mode(api_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_clear_flag(api_lbl, LV_OBJ_FLAG_SCROLLABLE);
+    y_off += 28;
+
+    lv_obj_t *bright_lbl = lv_label_create(box);
+    lv_label_set_text(bright_lbl, "Brightness");
+    lv_obj_set_style_text_font(bright_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(bright_lbl, lv_color_hex(0xcbd5e1), 0);
+    lv_obj_align(bright_lbl, LV_ALIGN_TOP_LEFT, 4, y_off);
+    lv_obj_clear_flag(bright_lbl, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slider = lv_slider_create(box);
     lv_slider_set_range(slider, 0, 100);
     lv_slider_set_value(slider, g_brightness, LV_ANIM_OFF);
-    lv_obj_set_width(slider, 200);
-    lv_obj_align(slider, LV_ALIGN_TOP_MID, 0, 90);
+    lv_obj_set_width(slider, TFT_W - 48);
+    lv_obj_align(slider, LV_ALIGN_TOP_MID, 0, y_off + 22);
     lv_obj_add_event_cb(slider, modal_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_clear_flag(slider, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *close_btn = lv_btn_create(box);
-    lv_obj_set_size(close_btn, 80, 32);
+    lv_obj_set_size(close_btn, 100, 36);
     lv_obj_align(close_btn, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_obj_add_event_cb(close_btn, modal_close_btn_cb, LV_EVENT_CLICKED, overlay);
+    lv_obj_clear_flag(close_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *close_lbl = lv_label_create(close_btn);
     lv_label_set_text(close_lbl, "Close");
+    lv_obj_set_style_text_font(close_lbl, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(close_lbl, lv_color_hex(0xf8fafc), 0);
     lv_obj_center(close_lbl);
 }
 

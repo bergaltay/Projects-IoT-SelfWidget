@@ -4,6 +4,7 @@
 #include "WidgetFactory.h"
 #include "lvgl.h"
 #include <stdio.h>
+#include <string.h>
 
 static void get_cell_bounds(lv_obj_t *parent, int position_index, lv_coord_t *x, lv_coord_t *y, lv_coord_t *w, lv_coord_t *h) {
     lv_coord_t pw = lv_obj_get_content_width(parent);
@@ -36,7 +37,16 @@ static lv_obj_t *make_cell_container(lv_obj_t *parent, int position_index) {
 
 static void build_weather_card(lv_obj_t *cont, JsonObject data) {
     const char *city = data["city"].as<const char *>();
-    if (!city) city = "?";
+    const char *location = city && city[0] ? city : "?";
+    if (city) {
+        const char *comma = strchr(city, ',');
+        if (comma && comma[1]) {
+            location = comma + 1;
+            while (*location == ' ') location++;
+        }
+    }
+    if (!location || !*location) location = "?";
+
     int temp = data["temperature"] | 0;
     const char *unit = data["unit"].as<const char *>();
     if (!unit) unit = "C";
@@ -44,12 +54,12 @@ static void build_weather_card(lv_obj_t *cont, JsonObject data) {
     if (!cond) cond = "?";
 
     char buf[64];
-    snprintf(buf, sizeof(buf), "%s", city);
-    lv_obj_t *lbl_city = lv_label_create(cont);
-    lv_label_set_text(lbl_city, buf);
-    lv_obj_set_style_text_font(lbl_city, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(lbl_city, lv_color_hex(0xcbd5e1), 0);
-    lv_obj_align(lbl_city, LV_ALIGN_TOP_MID, 0, 4);
+    snprintf(buf, sizeof(buf), "%s", location);
+    lv_obj_t *lbl_loc = lv_label_create(cont);
+    lv_label_set_text(lbl_loc, buf);
+    lv_obj_set_style_text_font(lbl_loc, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_loc, lv_color_hex(0xcbd5e1), 0);
+    lv_obj_align(lbl_loc, LV_ALIGN_TOP_MID, 0, 4);
 
     snprintf(buf, sizeof(buf), "%d °%s", temp, unit);
     lv_obj_t *lbl_temp = lv_label_create(cont);
@@ -98,7 +108,7 @@ static void build_stock_card(lv_obj_t *cont, JsonObject data) {
 static void build_system_stats(lv_obj_t *cont, JsonObject data) {
     int cpu = data["cpu_percent"] | 0;
     int mem = data["memory_percent"] | 0;
-    int disk = data["disk_percent"] | 0;
+    int temp = data["temp"] | 0;
 
     char buf[48];
     snprintf(buf, sizeof(buf), "CPU: %d%%", cpu);
@@ -115,12 +125,12 @@ static void build_system_stats(lv_obj_t *cont, JsonObject data) {
     lv_obj_set_style_text_color(lbl_mem, lv_color_hex(0xf8fafc), 0);
     lv_obj_align(lbl_mem, LV_ALIGN_LEFT_MID, 6, 0);
 
-    snprintf(buf, sizeof(buf), "Disk: %d%%", disk);
-    lv_obj_t *lbl_disk = lv_label_create(cont);
-    lv_label_set_text(lbl_disk, buf);
-    lv_obj_set_style_text_font(lbl_disk, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(lbl_disk, lv_color_hex(0xf8fafc), 0);
-    lv_obj_align(lbl_disk, LV_ALIGN_BOTTOM_LEFT, 6, -6);
+    snprintf(buf, sizeof(buf), "Temp: %d °C", temp);
+    lv_obj_t *lbl_temp = lv_label_create(cont);
+    lv_label_set_text(lbl_temp, buf);
+    lv_obj_set_style_text_font(lbl_temp, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lbl_temp, lv_color_hex(0xf8fafc), 0);
+    lv_obj_align(lbl_temp, LV_ALIGN_BOTTOM_LEFT, 6, -6);
 }
 
 void WidgetFactory::createWidget(

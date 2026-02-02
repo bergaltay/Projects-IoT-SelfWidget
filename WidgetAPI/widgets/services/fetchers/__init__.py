@@ -1,4 +1,5 @@
 from .base import BaseFetcher
+from .beszel import BeszelFetcher
 from .weather import WeatherFetcher
 from .stock import StockFetcher
 from .system_stats import SystemStatsFetcher
@@ -8,6 +9,7 @@ FETCHER_REGISTRY = {
     'weather-card': WeatherFetcher,
     'stock-card': StockFetcher,
     'system-stats': SystemStatsFetcher,
+    'server-stats': BeszelFetcher,
 }
 
 
@@ -19,4 +21,12 @@ def get_fetcher(slug: str):
     return fetcher_class()
 
 
-__all__ = ['BaseFetcher', 'WeatherFetcher', 'StockFetcher', 'SystemStatsFetcher', 'FETCHER_REGISTRY', 'get_fetcher']
+__all__ = [
+    'BaseFetcher',
+    'BeszelFetcher',
+    'WeatherFetcher',
+    'StockFetcher',
+    'SystemStatsFetcher',
+    'FETCHER_REGISTRY',
+    'get_fetcher',
+]
