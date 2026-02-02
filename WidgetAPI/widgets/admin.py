@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import WidgetType, Screen, WidgetInstance, DeviceSettings
+from .models import WidgetType, Screen, WidgetInstance, DeviceSettings, ActiveNotification
 
 
 @admin.register(WidgetType)
@@ -37,3 +37,10 @@ class DeviceSettingsAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ActiveNotification)
+class ActiveNotificationAdmin(admin.ModelAdmin):
+    list_display = ('title', 'level', 'is_active', 'source_identifier', 'created_at')
+    list_filter = ('level', 'is_active', 'source_identifier')
+    search_fields = ('title', 'message')

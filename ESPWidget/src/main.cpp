@@ -16,6 +16,10 @@
 #include "WidgetFactory.h"
 #include "lvgl.h"
 
+/* Widgets API: heavy data, every 60s. Notifications API: lightweight, every 5s. */
+#define UPDATE_INTERVAL_MS        60000
+#define NOTIFICATION_INTERVAL_MS  5000
+
 /* ----- Display (ILI9341) ----- */
 static Adafruit_ILI9341 tft = Adafruit_ILI9341(
     TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST, TFT_MISO
@@ -142,6 +146,51 @@ static lv_obj_t *g_content_area = NULL;
 static lv_obj_t *g_status_wifi_label = NULL;
 static lv_obj_t *g_status_clock_label = NULL;
 
+/* ----- Buzzer (tone on BUZZER_PIN via LEDC) ----- */
+#define LEDC_CHANNEL_BUZZER      1
+#define LEDC_RESOLUTION_BUZZER   8
+
+/* ----- Notification state (declared before callbacks that use them) ----- */
+static int64_t g_last_notification_id = 0;
+static lv_obj_t *g_notification_overlay = NULL;
+static bool g_buzzer_attached = false;
+/* Track active buzzer duration using millis() (non-LVGL) */
+static uint32_t g_buzzer_end_ms = 0;
+/* Last sound config so we can detect changes (duration/frequency/volume) */
+static bool g_last_sound_enabled = false;
+static unsigned int g_last_sound_duration_ms = 0;
+static unsigned int g_last_sound_frequency = 0;
+static uint8_t g_last_sound_volume = 0;
+
+static void buzzer_stop(void) {
+    ledcWriteTone(LEDC_CHANNEL_BUZZER, 0);
+    g_buzzer_end_ms = 0;
+}
+
+static void buzzer_play_tone(unsigned int frequency_hz, unsigned int duration_ms, uint8_t volume_pct) {
+    /* ledcWriteTone does not support volume directly; we ignore volume_pct for now. */
+    (void)volume_pct;
+
+    /* Clamp to a safe audible range; very low frequencies can cause visible power flicker. */
+    if (frequency_hz < 200U) frequency_hz = 200U;
+    if (frequency_hz > 8000U) frequency_hz = 8000U;
+
+    if (frequency_hz == 0) return;
+
+    buzzer_stop();
+    if (!g_buzzer_attached) {
+        ledcSetup(LEDC_CHANNEL_BUZZER, 1000, LEDC_RESOLUTION_BUZZER);
+        ledcAttachPin(BUZZER_PIN, LEDC_CHANNEL_BUZZER);
+        g_buzzer_attached = true;
+    }
+    ledcWriteTone(LEDC_CHANNEL_BUZZER, frequency_hz);
+    if (duration_ms > 0) {
+        g_buzzer_end_ms = millis() + duration_ms;
+    } else {
+        g_buzzer_end_ms = 0; /* indefinite until explicitly stopped */
+    }
+}
+
 static void settings_btn_cb(lv_event_t *e);
 
 static lv_obj_t *create_main_layout(void) {
@@ -259,11 +308,162 @@ static String fetch_screens_json() {
     return payload;
 }
 
+static String fetch_notifications_json() {
+    HTTPClient http;
+    String url = String(API_BASE_URL) + "/api/notifications/current/";
+    http.begin(url);
+    int code = http.GET();
+    String payload;
+    if (code == HTTP_CODE_OK || code == 204) {
+        payload = http.getString();
+    }
+    http.end();
+    return payload;
+}
+
 static void show_settings_modal();
 
 static void modal_close_btn_cb(lv_event_t *e) {
     lv_obj_t *overlay = (lv_obj_t *)lv_event_get_user_data(e);
     if (overlay) lv_obj_del(overlay);
+}
+
+/* ----- Notification popup (on layer_top, above all tabs) ----- */
+static void notification_dismiss_cb(lv_event_t *e) {
+    (void)e;
+    buzzer_stop();
+    if (g_notification_overlay) {
+        lv_obj_del(g_notification_overlay);
+        g_notification_overlay = NULL;
+    }
+}
+
+static void show_notification_modal(const char *title, const char *message, const char *level) {
+    if (g_notification_overlay) {
+        lv_obj_del(g_notification_overlay);
+        g_notification_overlay = NULL;
+    }
+    lv_obj_t *layer_top = lv_layer_top();
+    lv_obj_clear_flag(layer_top, LV_OBJ_FLAG_HIDDEN);
+    g_notification_overlay = lv_obj_create(layer_top);
+    lv_obj_set_size(g_notification_overlay, TFT_W, TFT_H);
+    lv_obj_set_pos(g_notification_overlay, 0, 0);
+    lv_obj_set_style_bg_color(g_notification_overlay, lv_color_hex(0x0f172a), 0);
+    lv_obj_set_style_bg_opa(g_notification_overlay, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(g_notification_overlay, 0, 0);
+    lv_obj_set_style_pad_all(g_notification_overlay, 12, 0);
+    lv_obj_clear_flag(g_notification_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(g_notification_overlay, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+    lv_obj_clear_flag(g_notification_overlay, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+
+    lv_obj_t *box = lv_obj_create(g_notification_overlay);
+    lv_obj_set_size(box, TFT_W - 24, 160);
+    lv_obj_center(box);
+    lv_obj_set_style_bg_color(box, lv_color_hex(0x1e293b), 0);
+    lv_obj_set_style_border_width(box, 2, 0);
+    lv_obj_set_style_pad_all(box, 8, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Title bar: red for CRITICAL, orange for WARNING */
+    lv_obj_t *title_bar = lv_obj_create(box);
+    lv_obj_set_size(title_bar, lv_pct(100), 28);
+    lv_obj_align(title_bar, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_radius(title_bar, 0, 0);
+    lv_obj_set_style_border_width(title_bar, 0, 0);
+    lv_obj_set_style_pad_all(title_bar, 4, 0);
+    if (level && strcmp(level, "WARNING") == 0) {
+        lv_obj_set_style_bg_color(title_bar, lv_color_hex(0xea580c), 0);
+    } else {
+        lv_obj_set_style_bg_color(title_bar, lv_color_hex(0xdc2626), 0);
+    }
+    lv_obj_clear_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title_lbl = lv_label_create(title_bar);
+    lv_label_set_text(title_lbl, title ? title : "Alert");
+    lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_14_tr, 0);
+    lv_obj_set_style_text_color(title_lbl, lv_color_hex(0xffffff), 0);
+    lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 4, 0);
+    lv_obj_set_width(title_lbl, lv_pct(100) - 8);
+    lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
+
+    lv_obj_t *msg_lbl = lv_label_create(box);
+    lv_label_set_text(msg_lbl, message ? message : "");
+    lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_14_tr, 0);
+    lv_obj_set_style_text_color(msg_lbl, lv_color_hex(0xe2e8f0), 0);
+    lv_obj_align(msg_lbl, LV_ALIGN_TOP_LEFT, 4, 32);
+    lv_obj_set_width(msg_lbl, TFT_W - 40);
+    lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *dismiss_btn = lv_btn_create(box);
+    lv_obj_set_size(dismiss_btn, 100, 32);
+    lv_obj_align(dismiss_btn, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_add_event_cb(dismiss_btn, notification_dismiss_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *dismiss_lbl = lv_label_create(dismiss_btn);
+    lv_label_set_text(dismiss_lbl, "Kapat");
+    lv_obj_set_style_text_font(dismiss_lbl, &lv_font_montserrat_14_tr, 0);
+    lv_obj_set_style_text_color(dismiss_lbl, lv_color_hex(0xf8fafc), 0);
+    lv_obj_center(dismiss_lbl);
+}
+
+static void close_notification_modal() {
+    if (g_notification_overlay) {
+        lv_obj_del(g_notification_overlay);
+        g_notification_overlay = NULL;
+    }
+    buzzer_stop();
+}
+
+/* NotificationManager: poll API, track last_notification_id, show modal, play sound for new only */
+static void poll_notifications() {
+    if (WiFi.status() != WL_CONNECTED) return;
+    String json = fetch_notifications_json();
+    if (json.length() == 0) return;  /* Fetch failed; don't change state */
+    JsonDocument doc;
+    if (deserializeJson(doc, json)) return;
+    JsonObject root = doc.as<JsonObject>();
+    bool active = root["active"] | false;
+    if (!active) {
+        g_last_notification_id = 0;
+        g_last_sound_enabled = false;
+        g_last_sound_duration_ms = 0;
+        g_last_sound_frequency = 0;
+        g_last_sound_volume = 0;
+        close_notification_modal();
+        return;
+    }
+    long long id = root["id"].as<long long>();
+    const char *title = root["title"].as<const char *>();
+    const char *message = root["message"].as<const char *>();
+    const char *level = root["level"].as<const char *>();
+    bool sound_enabled = root["sound_enabled"] | true;
+    int volume = (int)(root["volume"] | 100);
+    unsigned int duration_ms = (unsigned int)(root["duration_ms"] | 500);
+    unsigned int frequency = (unsigned int)(root["frequency"] | 2500);
+
+    uint8_t volume_clamped = (uint8_t)(volume > 100 ? 100 : (volume < 0 ? 0 : volume));
+
+    bool is_new_notification = (id != g_last_notification_id);
+    bool sound_changed =
+        is_new_notification ||
+        sound_enabled != g_last_sound_enabled ||
+        duration_ms != g_last_sound_duration_ms ||
+        frequency != g_last_sound_frequency ||
+        volume_clamped != g_last_sound_volume;
+
+    if (is_new_notification) {
+        g_last_notification_id = id;
+        show_notification_modal(title ? title : "Alert", message ? message : "", level);
+    }
+
+    /* Play sound when notification is new OR its sound config changed. */
+    if (sound_enabled && sound_changed) {
+        buzzer_play_tone(frequency, duration_ms, volume_clamped);
+    }
+
+    g_last_sound_enabled = sound_enabled;
+    g_last_sound_duration_ms = duration_ms;
+    g_last_sound_frequency = frequency;
+    g_last_sound_volume = volume_clamped;
 }
 
 static void modal_slider_cb(lv_event_t *e) {
@@ -470,9 +670,43 @@ void setup() {
 
 void loop() {
     static uint32_t last_tick = 0;
+    static uint32_t last_screen_ms = 0;
+    static uint32_t last_notification_ms = 0;
+    static bool timers_initialized = false;
     uint32_t now = millis();
     lv_tick_inc(now - last_tick);
     last_tick = now;
+
+    if (!timers_initialized) {
+        last_screen_ms = now;
+        last_notification_ms = now;
+        timers_initialized = true;
+    }
+
+    /* Widgets API: refetch every 60s and rebuild UI */
+    if (g_content_area && (now - last_screen_ms) >= (uint32_t)UPDATE_INTERVAL_MS) {
+        last_screen_ms = now;
+        if (WiFi.status() == WL_CONNECTED) {
+            String json = fetch_screens_json();
+            if (json.length() > 0) {
+                lv_obj_clean(g_content_area);
+                lv_obj_update_layout(lv_scr_act());
+                build_ui_from_screens(g_content_area, json);
+            }
+        }
+    }
+
+    /* Notifications API: poll every 5s */
+    if ((now - last_notification_ms) >= (uint32_t)NOTIFICATION_INTERVAL_MS) {
+        last_notification_ms = now;
+        poll_notifications();
+    }
+
+    /* Stop buzzer when its scheduled duration has elapsed */
+    if (g_buzzer_end_ms != 0 && (int32_t)(now - g_buzzer_end_ms) >= 0) {
+        buzzer_stop();
+    }
+
     lv_timer_handler();
     delay(5);
 }

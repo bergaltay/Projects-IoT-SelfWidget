@@ -72,3 +72,38 @@ class DeviceSettings(models.Model):
 
     def __str__(self):
         return 'Device settings (singleton)'
+
+
+class NotificationLevel(models.TextChoices):
+    INFO = 'INFO', 'Info'
+    WARNING = 'WARNING', 'Warning'
+    CRITICAL = 'CRITICAL', 'Critical'
+
+
+class ActiveNotification(models.Model):
+    """
+    Currently active high-priority alert for the device.
+    Fetchers (e.g. Beszel) create/update when there is an error; deactivate when recovered.
+    ESP32 polls /api/notifications/current/ every few seconds.
+    """
+    title = models.CharField(max_length=128)
+    message = models.TextField()
+    level = models.CharField(max_length=16, choices=NotificationLevel.choices, default=NotificationLevel.CRITICAL)
+    is_active = models.BooleanField(default=True)
+    # Sound config for ESP32 buzzer
+    sound_enabled = models.BooleanField(default=True)
+    volume = models.PositiveSmallIntegerField(default=100, help_text='0-100')
+    duration_ms = models.PositiveIntegerField(default=500)
+    frequency = models.PositiveIntegerField(default=2500, help_text='Hz')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    # Which source created this (e.g. 'beszel') so we can deactivate only that one
+    source_identifier = models.CharField(max_length=64, default='', blank=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Active notification'
+        verbose_name_plural = 'Active notifications'
+
+    def __str__(self):
+        return f'{self.title} ({self.level})'

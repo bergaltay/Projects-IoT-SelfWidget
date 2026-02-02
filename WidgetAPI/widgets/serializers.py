@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import WidgetType, Screen, WidgetInstance, DeviceSettings
+from .models import WidgetType, Screen, WidgetInstance, DeviceSettings, ActiveNotification
 from .services.fetchers import get_fetcher
 
 # Keys to strip from configuration before sending to client (never expose credentials)
@@ -59,3 +59,18 @@ class DeviceSettingsSerializer(serializers.ModelSerializer):
         model = DeviceSettings
         fields = ('id', 'wifi_ssids', 'poll_interval_sec', 'brightness')
         read_only_fields = ('id', 'wifi_ssids', 'poll_interval_sec', 'brightness')
+
+
+class ActiveNotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActiveNotification
+        fields = (
+            'id', 'title', 'message', 'level', 'is_active',
+            'sound_enabled', 'volume', 'duration_ms', 'frequency',
+            'created_at',
+        )
+        read_only_fields = (
+            'id', 'title', 'message', 'level', 'is_active',
+            'sound_enabled', 'volume', 'duration_ms', 'frequency',
+            'created_at',
+        )

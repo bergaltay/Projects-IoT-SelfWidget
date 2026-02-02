@@ -20,4 +20,7 @@
 #define XPT2046_CLK  25
 #define XPT2046_CS   33
 
+// Buzzer (PWM tone) - common CYD / ESP32-2432S028R
+#define BUZZER_PIN   27
+
 #endif /* CONFIG_PINS_H */
